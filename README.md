@@ -1,0 +1,2 @@
+# lavanderia
+configuracion para lavanderia
