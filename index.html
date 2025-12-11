@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Registro Lavandería</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Arial;max-width:900px;margin:10px auto;padding:10px;}
+    h1{font-size:1.5rem}
+    .card{border:1px solid #ddd;border-radius:8px;padding:12px;margin-bottom:12px;box-shadow:0 1px 2px rgba(0,0,0,0.04)}
+    label{display:block;margin-top:8px}
+    input[type="number"], input[type="text"], select {width:100%;padding:8px;margin-top:4px;border-radius:6px;border:1px solid #ccc;box-sizing:border-box}
+    button{padding:10px 14px;border-radius:8px;border:none;cursor:pointer;margin-top:8px;background:#007bff;color:white}
+    button:hover{background:#0056b3}
+    button:disabled{background:#ccc;cursor:not-allowed}
+    .row{display:flex;gap:10px}
+    .col{flex:1}
+    #adminArea{display:none}
+    .small{font-size:0.9rem;color:#555}
+    .success{color:green;font-weight:bold}
+    .error{color:red;font-weight:bold}
+    .loading{color:#007bff;font-style:italic}
+  </style>
+</head>
+<body>
+  <h1>Registro - Lavandería</h1>
+
+  <div class="card">
+    <div class="row">
+      <div class="col">
+        <label>Tipo de Servicio</label>
+        <select id="tipo">
+          <option value="Ropa">Ropa</option>
+          <option value="Toallas">Toallas</option>
+          <option value="Colchas">Colchas</option>
+        </select>
+      </div>
+      <div class="col">
+        <label>KG</label>
+        <input id="kg" type="number" min="0" step="0.1" value="1"/>
+      </div>
+    </div>
+
+    <label>Nombre del cliente</label>
+    <input id="cliente" type="text" placeholder="Nombre del cliente (opcional)"/>
+
+    <label>Entrega estimada (editable)</label>
+    <input id="entrega" type="text" placeholder="Ej: 11/12/2025 17:00"/>
+
+    <div style="margin-top:8px">
+      <button id="calcularBtn">Calcular precio</button>
+      <button id="registrarBtn">Registrar pedido</button>
+    </div>
+
+    <div id="resultado" class="small" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Ajustes rápidos</h3>
+    <p class="small">Precios actuales (puedes cambiarlos si eres administrador):</p>
+    <div class="row">
+      <div class="col">Ropa: $<span id="p_ropa">--</span> /kg</div>
+      <div class="col">Toallas: $<span id="p_toallas">--</span> /kg</div>
+      <div class="col">Colchas: $<span id="p_colchas">--</span> /kg</div>
+    </div>
+    <div style="margin-top:8px">
+      <button id="openAdmin">Cambiar precios (admin)</button>
+      <button id="saveEntrega">Guardar entrega por defecto</button>
+    </div>
+    <p class="small">Entrega por defecto: <span id="entrega_default">--</span></p>
+    <p class="small">Siguiente pedido: #<span id="nextOrder">--</span></p>
+  </div>
+
+  <div id="adminArea" class="card">
+    <h3 style="margin-top:0">Área administrativa</h3>
+    <label>Contraseña admin</label>
+    <input id="adminPassword" type="password" placeholder="Ingresa la contraseña"/>
+    <label>Precio Ropa ($/kg)</label>
+    <input id="adminRopa" type="number" step="0.01" min="0"/>
+    <label>Precio Toallas ($/kg)</label>
+    <input id="adminToallas" type="number" step="0.01" min="0"/>
+    <label>Precio Colchas ($/kg)</label>
+    <input id="adminColchas" type="number" step="0.01" min="0"/>
+    <div style="margin-top:8px">
+      <button id="savePricesBtn">Guardar precios</button>
+      <button id="closeAdmin" style="background:#6c757d">Cerrar</button>
+    </div>
+    <div id="adminMsg" class="small" style="margin-top:8px"></div>
+  </div>
+
+<script>
+  const WEBAPP_URL = 'https://script.google.com/macros/library/d/1Ee-W1T3Hks_MzM_bUZ8ghh0p_FbPFPWY7TtiXNIHzTAwdo2Ao8R9SZdI/2'; // <- pega la URL del deploy
+  let settings = {};
+
+  async function fetchSettings(){
+    // Validar que la URL esté configurada
+    if (WEBAPP_URL.includes('REEMPLAZAR')) {
+      document.getElementById('resultado').innerHTML = '<span class="error">⚠️ CONFIGURA LA URL DEL WEBAPP EN EL CÓDIGO (línea 72)</span>';
+      return;
+    }
+
+    try {
+      console.log('Intentando conectar a:', WEBAPP_URL);
+      const res = await fetch(WEBAPP_URL + '?action=getSettings');
+      console.log('Respuesta recibida:', res.status);
+      
+      if (!res.ok) throw new Error('Error en la respuesta del servidor: ' + res.status);
+      
+      settings = await res.json();
+      console.log('Settings cargados:', settings);
+      document.getElementById('p_ropa').textContent = settings.price_ropa || 0;
+      document.getElementById('p_toallas').textContent = settings.price_toallas || 0;
+      document.getElementById('p_colchas').textContent = settings.price_colchas || 0;
+      document.getElementById('entrega_default').textContent = settings.entrega_default || 'Sin configurar';
+      document.getElementById('entrega').value = settings.entrega_default || '';
+      
+      // Mostrar el número actual sin incrementar
+      const nextNum = (settings.lastOrderNumber || 0) + 1;
+      document.getElementById('nextOrder').textContent = nextNum;
+    } catch(err) {
+      console.error('Error fetchSettings:', err);
+      document.getElementById('resultado').innerHTML = '<span class="error">No se pudo cargar la configuración. Verifica la URL del webapp.</span>';
+    }
+  }
+
+  function calcularPrecio(){
+    const tipo = document.getElementById('tipo').value;
+    const kg = Number(document.getElementById('kg').value) || 0;
+    
+    if (kg <= 0) {
+      document.getElementById('resultado').innerHTML = '<span class="error">Ingresa un peso válido</span>';
+      return 0;
+    }
+    
+    let precioKg = settings.price_ropa || 15;
+    if (tipo === 'Toallas') precioKg = settings.price_toallas || 20;
+    if (tipo === 'Colchas') precioKg = settings.price_colchas || 35;
+    
+    const total = precioKg * kg;
+    document.getElementById('resultado').innerHTML = `<span class="success">Precio estimado: $${total.toFixed(2)} (${kg} kg x $${precioKg}/kg)</span>`;
+    return total;
+  }
+
+  async function registrarPedido(){
+    const tipo = document.getElementById('tipo').value;
+    const kg = Number(document.getElementById('kg').value) || 0;
+    const cliente = document.getElementById('cliente').value.trim();
+    const entrega = document.getElementById('entrega').value.trim() || (settings.entrega_default || '');
+    
+    if (kg <= 0) { 
+      document.getElementById('resultado').innerHTML = '<span class="error">Ingresa un peso válido (mayor a 0)</span>';
+      return; 
+    }
+
+    const btn = document.getElementById('registrarBtn');
+    btn.disabled = true;
+    document.getElementById('resultado').innerHTML = '<span class="loading">Registrando pedido...</span>';
+
+    const payload = { tipo, kg, cliente, entrega };
+    
+    try {
+      const res = await fetch(WEBAPP_URL + '?action=addOrder', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      
+      if (!res.ok) throw new Error('Error en la respuesta del servidor');
+      
+      const j = await res.json();
+      
+      if (j.success) {
+        document.getElementById('resultado').innerHTML = `<span class="success">✓ Pedido #${j.pedido} registrado exitosamente<br>Total: $${j.total.toFixed(2)}</span>`;
+        
+        // Limpiar formulario
+        document.getElementById('kg').value = 1;
+        document.getElementById('cliente').value = '';
+        
+        // Actualizar settings para reflejar nuevo número de pedido
+        await fetchSettings();
+      } else {
+        document.getElementById('resultado').innerHTML = `<span class="error">Error al registrar: ${j.error || 'Desconocido'}</span>`;
+      }
+    } catch(err) {
+      console.error('Error registrarPedido:', err);
+      document.getElementById('resultado').innerHTML = `<span class="error">Error de conexión. Verifica tu internet y la URL del webapp.</span>`;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // Admin UI
+  document.getElementById('openAdmin').addEventListener('click', ()=> {
+    document.getElementById('adminArea').style.display = 'block';
+    document.getElementById('adminRopa').value = settings.price_ropa || 15;
+    document.getElementById('adminToallas').value = settings.price_toallas || 20;
+    document.getElementById('adminColchas').value = settings.price_colchas || 35;
+    document.getElementById('adminMsg').textContent = '';
+    document.getElementById('adminPassword').value = '';
+  });
+
+  document.getElementById('closeAdmin').addEventListener('click', ()=> {
+    document.getElementById('adminArea').style.display = 'none';
+    document.getElementById('adminPassword').value = '';
+    document.getElementById('adminMsg').textContent = '';
+  });
+
+  document.getElementById('savePricesBtn').addEventListener('click', async ()=>{
+    const password = document.getElementById('adminPassword').value;
+    const price_ropa = Number(document.getElementById('adminRopa').value);
+    const price_toallas = Number(document.getElementById('adminToallas').value);
+    const price_colchas = Number(document.getElementById('adminColchas').value);
+
+    if (!password) {
+      document.getElementById('adminMsg').innerHTML = '<span class="error">Ingresa la contraseña</span>';
+      return;
+    }
+
+    if (price_ropa <= 0 || price_toallas <= 0 || price_colchas <= 0) {
+      document.getElementById('adminMsg').innerHTML = '<span class="error">Los precios deben ser mayores a 0</span>';
+      return;
+    }
+
+    const btn = document.getElementById('savePricesBtn');
+    btn.disabled = true;
+    document.getElementById('adminMsg').innerHTML = '<span class="loading">Guardando...</span>';
+
+    const payload = { password, price_ropa, price_toallas, price_colchas };
+    
+    try {
+      const res = await fetch(WEBAPP_URL + '?action=updatePrices', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      
+      if (!res.ok) throw new Error('Error en la respuesta del servidor');
+      
+      const j = await res.json();
+      
+      if (j.success) {
+        document.getElementById('adminMsg').innerHTML = '<span class="success">✓ Precios actualizados correctamente</span>';
+        await fetchSettings();
+        document.getElementById('adminPassword').value = '';
+        
+        // Cerrar panel admin después de 2 segundos
+        setTimeout(() => {
+          document.getElementById('adminArea').style.display = 'none';
+          document.getElementById('adminMsg').textContent = '';
+        }, 2000);
+      } else {
+        const errorMsg = j.error === 'password_incorrecto' ? 'Contraseña incorrecta' : (j.error || 'Error desconocido');
+        document.getElementById('adminMsg').innerHTML = `<span class="error">Error: ${errorMsg}</span>`;
+      }
+    } catch(err) {
+      console.error('Error updatePrices:', err);
+      document.getElementById('adminMsg').innerHTML = '<span class="error">Error de conexión</span>';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // Guardar entrega por defecto (editable por cualquiera)
+  document.getElementById('saveEntrega').addEventListener('click', async ()=>{
+    const entregaVal = document.getElementById('entrega').value.trim();
+    
+    if (!entregaVal) {
+      document.getElementById('resultado').innerHTML = '<span class="error">Ingresa una fecha de entrega</span>';
+      return;
+    }
+
+    const btn = document.getElementById('saveEntrega');
+    btn.disabled = true;
+    document.getElementById('resultado').innerHTML = '<span class="loading">Guardando...</span>';
+
+    try {
+      const res = await fetch(WEBAPP_URL + '?action=updateEntrega', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ entrega_default: entregaVal })
+      });
+      
+      if (!res.ok) throw new Error('Error en la respuesta del servidor');
+      
+      const j = await res.json();
+      
+      if (j.success) {
+        document.getElementById('resultado').innerHTML = `<span class="success">✓ Entrega por defecto actualizada: ${entregaVal}</span>`;
+        await fetchSettings();
+      } else {
+        document.getElementById('resultado').innerHTML = `<span class="error">No se pudo actualizar la entrega</span>`;
+      }
+    } catch(err) {
+      console.error('Error updateEntrega:', err);
+      document.getElementById('resultado').innerHTML = `<span class="error">Error de conexión</span>`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('calcularBtn').addEventListener('click', calcularPrecio);
+  document.getElementById('registrarBtn').addEventListener('click', registrarPedido);
+
+  // Calcular automáticamente al cambiar tipo o kg
+  document.getElementById('tipo').addEventListener('change', calcularPrecio);
+  document.getElementById('kg').addEventListener('input', () => {
+    const kg = Number(document.getElementById('kg').value);
+    if (kg > 0) calcularPrecio();
+  });
+
+  // Inicializar al cargar la página
+  fetchSettings();
+</script>
+</body>
+</html>
